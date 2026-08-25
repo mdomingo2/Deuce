@@ -27,20 +27,21 @@ Network) does scheduling and standings. None of them sell the guarantee.
 
 ## Current state
 
-Phase 0 and the core of Phase 2. `@deuce/scheduler` is complete and tested; the
-web app and database packages are scaffolded but empty.
+Phases 0 and 1, plus the core of Phase 2. The scheduler and the database schema
+are complete and tested; the web app is still a scaffold.
 
 | Package | State |
 |---|---|
 | `packages/scheduler` | Working. Capacity math, round-robin construction, hard-constraint validation, CLI preview. 21 tests. |
-| `packages/db` | Scaffold only. Drizzle schema next. |
+| `packages/db` | Working. 18 tables, RLS on every one of them, append-only entitlement ledger. Migrations and RLS tests run against a real Postgres. |
 | `apps/web` | Scaffold only. Next.js PWA next. |
 
 ## Try it
 
 ```bash
 pnpm install
-pnpm test
+pnpm test                              # scheduler unit tests
+pnpm --filter @deuce/db test:db        # migrations + RLS, against a real Postgres
 
 # Preview a season without a database, a server, or an account
 pnpm --filter @deuce/scheduler preview
@@ -89,3 +90,32 @@ Tailwind · shadcn/ui · Vercel.
 Supabase is chosen over a roll-your-own Postgres mainly for realtime chat —
 Vercel's serverless runtime cannot hold a WebSocket — and for `pg_cron`, which
 drives sub-request escalation and 48-hour score auto-confirmation.
+
+## The database
+
+18 tables under `packages/db`, generated migrations plus a hand-written one for
+everything drizzle-kit cannot express: row-level security, the Supabase auth
+bridge, and the constraints that make an invalid league impossible.
+
+Three decisions carry the weight:
+
+**`org_id` is denormalised onto every tenant-scoped table**, even where it could
+be derived. Every RLS policy is then the same one-line predicate and every index
+stays cheap.
+
+**The entitlement ledger is append-only.** `UPDATE` and `DELETE` are revoked and
+a trigger rejects them outright; a correction is a compensating row with reason
+`admin_adjust`. A balance is always `sum(delta)`, never a stored number someone
+edited. The product is a promise about money, so the history has to be
+auditable.
+
+**A mixed-doubles team cannot be built wrong.** A trigger checks that the male
+seat holds a player whose pairing category is `M` and the female seat one of
+`F`; unique indexes stop anyone appearing on two teams in a season. The
+scheduler can therefore assume every team is playable.
+
+`packages/db/test/run.sh` applies the shim, the migrations, and the RLS tests to
+a throwaway database. It uses `$DATABASE_URL` when set and otherwise starts a
+private Postgres cluster, so it needs neither Docker nor a Supabase project. The
+tests run as a real `authenticated` session with `auth.uid()` set, because RLS is
+bypassed for superusers and a test that forgets to switch role proves nothing.

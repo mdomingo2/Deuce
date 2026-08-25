@@ -32,6 +32,9 @@ importers:
         specifier: ^3.4.9
         version: 3.4.9
     devDependencies:
+      '@types/node':
+        specifier: ^26.3.0
+        version: 26.3.0
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
@@ -41,6 +44,9 @@ importers:
 
   packages/scheduler:
     devDependencies:
+      '@types/node':
+        specifier: ^26.3.0
+        version: 26.3.0
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

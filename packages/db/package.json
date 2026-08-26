@@ -21,6 +21,7 @@
     "typecheck": "tsc --noEmit",
     "generate": "drizzle-kit generate",
     "migrate": "drizzle-kit migrate",
-    "test:db": "./test/run.sh"
+    "test:db": "./test/run.sh",
+    "bundle": "./scripts-bundle.sh"
   }
 }

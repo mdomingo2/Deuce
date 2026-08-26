@@ -7,11 +7,15 @@ Schema, migrations and row-level security for Deuce.
 Run the migrations in `migrations/` **in filename order** against your project.
 Two ways:
 
-**SQL editor** (no database password needed). Open the Supabase SQL editor and
-paste each file in order:
+**SQL editor** (no database password needed, one paste):
 
-1. `migrations/0000_*.sql` — tables, enums, indexes
-2. `migrations/0001_rls_and_constraints.sql` — RLS, auth bridge, constraints
+```bash
+pnpm --filter @deuce/db bundle    # writes dist/supabase-setup.sql
+```
+
+Paste `dist/supabase-setup.sql` into the Supabase SQL editor and run it once.
+It concatenates every migration in order. Or paste the individual files from
+`migrations/` in filename order if you prefer to see them apply one at a time.
 
 **drizzle-kit** (needs the pooler connection string):
 

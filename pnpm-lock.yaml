@@ -25,6 +25,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@deuce/scheduler':
+        specifier: workspace:*
+        version: link:../scheduler
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)

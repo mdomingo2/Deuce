@@ -1,0 +1,21 @@
+{
+  "org": { "name": "Jamison Mixed Doubles", "slug": "jamison-mixed", "timezone": "America/New_York" },
+  "league": { "name": "Tuesday Night Mixed" },
+  "venue": { "name": "Home Courts", "address": "Jamison, PA" },
+  "courts": ["Court 1", "Court 2"],
+
+  "season": {
+    "name": "Spring 2026",
+    "//startDate": "First playing night. Must fall on nightOfWeek.",
+    "startDate": "2026-04-07",
+    "//nightOfWeek": "0 = Sunday, 2 = Tuesday.",
+    "nightOfWeek": 2,
+    "//playingWeeks": "Weeks that count toward the guarantee.",
+    "playingWeeks": 26,
+    "//calendarWeeks": "Two more than playingWeeks leaves flex weeks for rain.",
+    "calendarWeeks": 28
+  },
+
+  "//timeSlots": "One entry is a single wave. Add a second to put every couple on court every week and double what the season can sell.",
+  "timeSlots": [{ "startTime": "18:30", "durationMinutes": 90 }]
+}

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@deuce/scheduler": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.9"
   },
@@ -22,6 +23,7 @@
     "generate": "drizzle-kit generate",
     "migrate": "drizzle-kit migrate",
     "test:db": "./test/run.sh",
-    "bundle": "./scripts-bundle.sh"
+    "bundle": "./scripts-bundle.sh",
+    "seed": "tsx src/seed.ts"
   }
 }

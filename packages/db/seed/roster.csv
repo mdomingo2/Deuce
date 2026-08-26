@@ -1,0 +1,9 @@
+team_name,m_first,m_last,m_email,m_ntrp,f_first,f_last,f_email,f_ntrp,weeks_purchased
+Domingo,Mike,Domingo,mike@example.com,3.5,Sarah,Domingo,sarah@example.com,3.5,12
+Hoffman,Dan,Hoffman,dan@example.com,4.0,Dana,Hoffman,dana@example.com,3.5,12
+Reyes,Carlos,Reyes,carlos@example.com,3.5,Elena,Reyes,elena@example.com,4.0,12
+Whitaker,Tom,Whitaker,tom@example.com,3.0,Beth,Whitaker,beth@example.com,3.5,12
+Nakamura,Ken,Nakamura,ken@example.com,4.0,Yuki,Nakamura,yuki@example.com,4.0,12
+Okafor,Sam,Okafor,sam@example.com,3.5,Ada,Okafor,ada@example.com,3.5,12
+Bergstrom,Erik,Bergstrom,erik@example.com,3.0,Ingrid,Bergstrom,ingrid@example.com,3.0,12
+Silva,Paulo,Silva,paulo@example.com,4.0,Ana,Silva,ana@example.com,3.5,12

@@ -22,3 +22,12 @@ export {
 } from './text.js';
 export { Machine } from './machine.js';
 export type { MachineHooks, RunResult, StatusLine } from './machine.js';
+export { WorldReader, DIRECTIONS } from './world.js';
+export type {
+  Direction,
+  Exit,
+  ObjectView,
+  StoryProfile,
+  WorldSnapshot,
+} from './world.js';
+export { ZORK1_R88 } from './zork1.js';

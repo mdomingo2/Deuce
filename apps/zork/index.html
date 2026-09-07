@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%2307080a%27/%3E%3Ccircle cx=%2716%27 cy=%2717%27 r=%277%27 fill=%27%23e8b96a%27/%3E%3Crect x=%2713%27 y=%275%27 width=%276%27 height=%274%27 fill=%27%238a6a2e%27/%3E%3C/svg%3E" />
+    <title>Zork I — The Great Underground Empire</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="viewport"></canvas>
+
+    <!-- Shown until a story file is available. -->
+    <div id="loader" class="panel-overlay">
+      <div class="loader-card">
+        <h1>ZORK I</h1>
+        <p class="subtitle">The Great Underground Empire</p>
+        <p class="loader-body" id="loader-message">Looking for a story file&hellip;</p>
+        <label class="file-drop" id="file-drop">
+          <input type="file" id="file-input" accept=".z3,.dat,.zip" hidden />
+          <span>Choose <code>zork1.z3</code></span>
+        </label>
+        <p class="loader-note">
+          The story file is Infocom's and is not distributed here. Drop in your
+          own copy and it stays in this browser.
+        </p>
+      </div>
+    </div>
+
+    <div id="hud" hidden>
+      <div class="hud-corner hud-top-left">
+        <div class="room-name" id="room-name"></div>
+        <div class="stat-row">
+          <span class="stat"><span class="stat-label">Score</span><span id="score">0</span></span>
+          <span class="stat"><span class="stat-label">Moves</span><span id="moves">0</span></span>
+        </div>
+      </div>
+
+      <div class="hud-corner hud-top-right">
+        <div class="carry" id="carry">
+          <div class="carry-label">Carrying</div>
+          <div class="carry-bar"><div class="carry-fill" id="carry-fill"></div></div>
+          <div class="carry-text" id="carry-text"></div>
+        </div>
+        <ul class="inventory" id="inventory"></ul>
+      </div>
+
+      <div class="hud-corner hud-bottom-left">
+        <div class="compass" id="compass"></div>
+      </div>
+
+      <div class="reticle" id="reticle"></div>
+      <div class="focus-label" id="focus-label"></div>
+
+      <div class="console" id="console">
+        <div class="transcript" id="transcript"></div>
+        <form class="prompt" id="prompt-form" autocomplete="off">
+          <span class="caret">&gt;</span>
+          <input type="text" id="prompt-input" spellcheck="false" autocomplete="off" />
+        </form>
+      </div>
+
+      <div class="hint" id="hint">
+        <kbd>click</kbd> to look &middot; <kbd>W A S D</kbd> move &middot;
+        <kbd>E</kbd> interact &middot; <kbd>Tab</kbd> type a command
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

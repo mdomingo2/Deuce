@@ -84,8 +84,15 @@ export const ZORK1_R88: StoryProfile = {
     moves: 2,
     lit: 66,
     /**
-     * Zork I's load allowance, 100 units. The game enforces it itself; this is
-     * read only so the interface can show how close to it you are.
+     * Zork I's load allowance. Starts at 100 and is *not* a constant: a light
+     * wound from the troll drops it to 90, so an injured adventurer genuinely
+     * cannot carry as much. It was identified by watching it fall on exactly
+     * the turn "diagnose" started reporting a wound.
+     *
+     * The game enforces the limit itself. This is read only so the interface
+     * can show how close to it you are — and so the drop after a fight is
+     * visible rather than being discovered when something refuses to be
+     * picked up.
      */
     carryLimit: 133,
   },

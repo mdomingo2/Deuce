@@ -301,6 +301,45 @@ describe.skipIf(!hasStory)('the Zork I profile is derived, not assumed', () => {
     expect(machine.objects.getProperty(bottle, ZORK1_R88.properties.size)).toBe(5);
   });
 
+  it('sees the load allowance fall when the troll wounds the player', () => {
+    // Zork I's carry limit is not a constant: a wound reduces it. Standing in
+    // the Troll Room without fighting back is the shortest way to prove the
+    // profile is reading the right global, because the number moves on exactly
+    // the turn the player is injured.
+    const image = new Uint8Array(readFileSync(STORY_PATH));
+    let output = '';
+    const machine = new Machine(image, { onOutput: (t) => (output += t) }, 424242);
+    const reader = new WorldReader(machine, ZORK1_R88);
+
+    const step = (move: string) => {
+      machine.run();
+      machine.provideInput(move);
+      machine.run();
+    };
+
+    for (const move of [
+      'n', 'e', 'open window', 'enter window', 'w',
+      'take lamp', 'take sword', 'move rug', 'open trap door',
+      'turn on lamp', 'down', 'n',
+    ]) {
+      step(move);
+    }
+    expect(reader.snapshot().room.name).toBe('The Troll Room');
+    expect(reader.snapshot().carried.limit).toBe(100);
+
+    // Let the troll swing until it connects.
+    for (let turn = 0; turn < 12; turn += 1) {
+      step('wait');
+      if (reader.snapshot().carried.limit < 100) break;
+    }
+
+    expect(reader.snapshot().carried.limit).toBe(90);
+
+    output = '';
+    step('diagnose');
+    expect(output).toMatch(/wound/i);
+  });
+
   it('leaves capacity limits to the story file, which still enforces them', () => {
     // Nothing in this package implements a limit. The sack holds 15 and the
     // sword is 30, and it is Infocom's code that says no — which is the whole

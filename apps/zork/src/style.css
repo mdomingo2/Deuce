@@ -1,0 +1,524 @@
+/*
+ * The interface sits between two eras on purpose.
+ *
+ * The world is rendered in three dimensions, but everything the player reads is
+ * still the original text, so the overlay is built like a terminal: monospace,
+ * dark, and lit by a single warm amber that stands in for the brass lantern.
+ * Nothing here is chrome for its own sake — every panel answers a question the
+ * text game answered with a command (inventory, score, which way out).
+ */
+
+:root {
+  /* Phosphor amber, which doubles as the lantern's colour in the 3D scene. */
+  --amber: #e8b96a;
+  --amber-dim: #8a6d3c;
+  --amber-glow: rgba(232, 185, 106, 0.16);
+
+  /* The cold blue the elvish sword glows when danger is near. */
+  --elvish: #7fb7d4;
+
+  --ink: #07080a;
+  --ink-soft: rgba(8, 9, 12, 0.82);
+  --paper: #d8d4cb;
+  --paper-dim: #8e8a82;
+  --rule: rgba(232, 185, 106, 0.22);
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#viewport {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* The canvas never takes pointer events directly; the HUD layer forwards
+     them, which keeps the pointer-lock request in one place. */
+  cursor: crosshair;
+}
+
+/* ---------------------------------------------------------------- loader -- */
+
+/*
+ * `display: grid` here is an author style, and author styles beat the user
+ * agent's `[hidden] { display: none }` — so hiding the loader needs its own
+ * rule or the panel stays on screen over a perfectly working game.
+ */
+.panel-overlay[hidden] {
+  display: none;
+}
+
+.panel-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(232, 185, 106, 0.07), transparent 60%),
+    var(--ink);
+  z-index: 40;
+}
+
+.loader-card {
+  width: min(30rem, calc(100vw - 3rem));
+  padding: 2.5rem 2rem;
+  text-align: center;
+  border: 1px solid var(--rule);
+  background: rgba(12, 13, 16, 0.9);
+}
+
+.loader-card h1 {
+  margin: 0;
+  font-size: 2.5rem;
+  letter-spacing: 0.32em;
+  /* Optical correction: letter-spacing adds trailing space that would
+     otherwise push the centred title visibly to the left. */
+  text-indent: 0.32em;
+  color: var(--amber);
+  text-shadow: 0 0 24px var(--amber-glow);
+}
+
+.subtitle {
+  margin: 0.25rem 0 2rem;
+  color: var(--paper-dim);
+  letter-spacing: 0.12em;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.loader-body {
+  margin: 0 0 1.5rem;
+  color: var(--paper);
+  min-height: 1.5em;
+}
+
+.file-drop {
+  display: block;
+  padding: 1rem;
+  border: 1px dashed var(--amber-dim);
+  color: var(--amber);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.file-drop:hover,
+.file-drop.is-dragging {
+  background: var(--amber-glow);
+  border-color: var(--amber);
+}
+
+.file-drop code {
+  color: var(--paper);
+}
+
+.loader-note {
+  margin: 1.5rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: var(--paper-dim);
+}
+
+.loader-card.is-error .loader-body {
+  color: #d98a7a;
+}
+
+/* ------------------------------------------------------------------- hud -- */
+
+#hud {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  /* The HUD is a heads-up layer: it must not swallow mouse-look. Individual
+     panels opt back into pointer events. */
+  pointer-events: none;
+}
+
+#hud[hidden] {
+  display: none;
+}
+
+.hud-corner {
+  position: absolute;
+  padding: 1.25rem 1.5rem;
+}
+
+.hud-top-left {
+  top: 0;
+  left: 0;
+}
+
+.hud-top-right {
+  top: 0;
+  right: 0;
+  text-align: right;
+  max-width: 18rem;
+}
+
+.hud-bottom-left {
+  bottom: 0;
+  left: 0;
+}
+
+.room-name {
+  font-size: 1.05rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--amber);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.9);
+}
+
+.stat-row {
+  display: flex;
+  gap: 1.25rem;
+  margin-top: 0.35rem;
+}
+
+.stat {
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--paper);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+}
+
+.stat-label {
+  color: var(--paper-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* --------------------------------------------------------- carry + items -- */
+
+.carry-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+}
+
+.carry-bar {
+  height: 3px;
+  margin: 0.35rem 0 0.3rem;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.carry-fill {
+  height: 100%;
+  width: 0;
+  margin-left: auto;
+  background: var(--amber);
+  transition: width 180ms ease, background-color 180ms ease;
+}
+
+/* The bar turns amber-red as the original's load limit comes into reach. */
+.carry-fill.is-heavy {
+  background: #d98a4a;
+}
+
+.carry-fill.is-full {
+  background: #d9694a;
+}
+
+.carry-text {
+  font-size: 0.72rem;
+  color: var(--paper-dim);
+}
+
+.inventory {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  font-size: 0.8rem;
+}
+
+.inventory li {
+  color: var(--paper);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+  padding: 0.05rem 0;
+}
+
+.inventory li.is-nested {
+  padding-right: 0.9rem;
+  color: var(--paper-dim);
+  font-size: 0.74rem;
+}
+
+.inventory li.is-lit {
+  color: var(--amber);
+}
+
+.inventory-empty {
+  color: var(--paper-dim);
+  font-style: italic;
+}
+
+/* --------------------------------------------------------------- compass -- */
+
+.compass {
+  display: grid;
+  grid-template-columns: repeat(3, 1.55rem);
+  grid-template-rows: repeat(3, 1.55rem);
+  gap: 2px;
+  pointer-events: auto;
+}
+
+.compass-cell {
+  display: grid;
+  place-items: center;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--paper-dim);
+  border: 1px solid transparent;
+  background: rgba(8, 9, 12, 0.55);
+  cursor: default;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+/* A direction the room actually offers. */
+.compass-cell.is-open {
+  color: var(--amber);
+  border-color: var(--rule);
+  cursor: pointer;
+}
+
+.compass-cell.is-open:hover {
+  background: var(--amber-glow);
+  border-color: var(--amber);
+}
+
+/* An exit that exists but is shut: the window, the barred trap door. */
+.compass-cell.is-shut {
+  color: var(--amber-dim);
+  border-color: rgba(232, 185, 106, 0.12);
+  cursor: pointer;
+}
+
+.compass-vertical {
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+  pointer-events: auto;
+}
+
+.compass-vertical .compass-cell {
+  width: 2.35rem;
+  height: 1.35rem;
+}
+
+/* -------------------------------------------------- reticle + focus label -- */
+
+.reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: rgba(216, 212, 203, 0.5);
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.reticle.is-targeting {
+  background: var(--amber);
+  transform: scale(1.6);
+}
+
+.focus-label {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 1.5rem);
+  transform: translateX(-50%);
+  font-size: 0.8rem;
+  color: var(--amber);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.95);
+  opacity: 0;
+  transition: opacity 120ms ease;
+  white-space: nowrap;
+}
+
+.focus-label.is-visible {
+  opacity: 1;
+}
+
+/* --------------------------------------------------------------- console -- */
+
+.console {
+  position: absolute;
+  left: 50%;
+  bottom: 1.5rem;
+  transform: translateX(-50%);
+  width: min(46rem, calc(100vw - 3rem));
+  pointer-events: auto;
+}
+
+.transcript {
+  max-height: 11rem;
+  overflow-y: auto;
+  padding: 0.75rem 1rem;
+  background: var(--ink-soft);
+  border: 1px solid var(--rule);
+  border-bottom: none;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  /* Long room descriptions read better with a slightly loosened measure. */
+  line-height: 1.6;
+  scrollbar-width: thin;
+  scrollbar-color: var(--amber-dim) transparent;
+}
+
+.transcript p {
+  margin: 0 0 0.6rem;
+}
+
+.transcript p:last-child {
+  margin-bottom: 0;
+}
+
+/* The player's own commands, echoed back the way a terminal would. */
+.transcript .echo {
+  color: var(--amber);
+}
+
+.prompt {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 1rem;
+  background: var(--ink-soft);
+  border: 1px solid var(--rule);
+}
+
+.prompt .caret {
+  color: var(--amber);
+}
+
+.prompt input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--paper);
+  font: inherit;
+}
+
+.prompt input::placeholder {
+  color: var(--paper-dim);
+}
+
+/* Collapsed while the player is looking around with the pointer locked. */
+.console.is-idle .transcript {
+  max-height: 5.5rem;
+  opacity: 0.72;
+}
+
+/* ------------------------------------------------------------------ hint -- */
+
+.hint {
+  position: absolute;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  font-size: 0.7rem;
+  color: var(--paper-dim);
+  letter-spacing: 0.04em;
+  transition: opacity 300ms ease;
+}
+
+.hint.is-hidden {
+  opacity: 0;
+}
+
+kbd {
+  display: inline-block;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--rule);
+  color: var(--amber-dim);
+  font: inherit;
+  font-size: 0.95em;
+}
+
+/* --------------------------------------------------------------- effects -- */
+
+/*
+ * A vignette and a faint scanline wash, both purely atmospheric. They sit
+ * above the canvas and below the HUD, and never intercept the pointer.
+ */
+.overlay-effects {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0) 0,
+      rgba(0, 0, 0, 0) 2px,
+      rgba(0, 0, 0, 0.13) 3px
+    ),
+    radial-gradient(ellipse at center, transparent 52%, rgba(0, 0, 0, 0.72) 100%);
+  mix-blend-mode: multiply;
+}
+
+/* A single dark pulse when the player moves between rooms. */
+.room-fade {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  background: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.room-fade.is-active {
+  opacity: 1;
+  transition-duration: 60ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-fade,
+  .carry-fill,
+  .reticle,
+  .focus-label {
+    transition: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .hud-top-right {
+    max-width: 11rem;
+  }
+
+  .inventory {
+    font-size: 0.72rem;
+  }
+
+  .hint {
+    display: none;
+  }
+
+  .transcript {
+    max-height: 7rem;
+  }
+}

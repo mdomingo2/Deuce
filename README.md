@@ -80,7 +80,14 @@ on the same court all season. There is a test for this.
 packages/scheduler   pure TypeScript, no I/O
 packages/db          Drizzle schema, migrations, RLS policies
 apps/web             Next.js 15 App Router PWA
+
+packages/zmachine    a Z-machine v3 interpreter        (unrelated to the league)
+apps/zork            Zork I in first person            (unrelated to the league)
 ```
+
+`packages/zmachine` and `apps/zork` are a side project that shares the
+workspace and nothing else — no imports in either direction. See
+[apps/zork/README.md](apps/zork/README.md).
 
 ## Stack
 
@@ -119,3 +126,19 @@ a throwaway database. It uses `$DATABASE_URL` when set and otherwise starts a
 private Postgres cluster, so it needs neither Docker nor a Supabase project. The
 tests run as a real `authenticated` session with `auth.uid()` set, because RLS is
 bypassed for superusers and a test that forgets to switch role proves nothing.
+
+## The other thing in here
+
+`apps/zork` is a first-person, walkable Zork I, and `packages/zmachine` is the
+Z-machine version 3 interpreter underneath it. It shares this workspace for
+convenience and touches nothing the league uses.
+
+The interesting part is that none of Zork is reimplemented. The interpreter
+executes Infocom's original story file and a reader turns its live object tree
+into rooms, exits and inventory for a Three.js renderer; walking through a
+doorway sends `north` to the 1981 parser and the player moves only if the game
+says so. The story file is copyrighted and is not distributed here.
+
+```bash
+pnpm --filter @deuce/zork dev
+```

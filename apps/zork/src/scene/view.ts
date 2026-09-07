@@ -34,6 +34,8 @@ const DOORWAY_TRIGGER = 1.15;
  * it and bounce the player back and forth between two rooms forever.
  */
 const ARRIVAL_GRACE_MS = 550;
+/** Radians of rotation per pixel of mouse travel. */
+const LOOK_SENSITIVITY = 0.0025;
 
 /**
  * Which way the player is facing after travelling in each direction.
@@ -118,7 +120,10 @@ export class WorldView {
   private arrivedAt = 0;
   private lastDirection: Direction | null = null;
   private movementLocked = false;
+  private typing = false;
   private focused: string | null = null;
+  /** Set while the left button is held and the pointer is not locked. */
+  private dragging: { x: number; y: number; travelled: number } | null = null;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -158,12 +163,29 @@ export class WorldView {
     window.addEventListener('keydown', this.handleKeyDown);
     window.addEventListener('keyup', this.handleKeyUp);
     canvas.addEventListener('mousedown', this.handleClick);
+    // On window rather than the canvas, so a drag that wanders over the HUD
+    // keeps turning instead of sticking.
+    window.addEventListener('mousemove', this.handleMouseMove);
+    window.addEventListener('mouseup', this.handleMouseUp);
   }
 
   // -------------------------------------------------------------- pointer lock
 
+  /**
+   * Ask for the pointer, and shrug if the answer is no.
+   *
+   * `requestPointerLock` returns a promise in current browsers and rejects
+   * when the page is not allowed to have it — an iframe without the
+   * `pointer-lock` permission, most commonly. Left unhandled that is an
+   * uncaught rejection in the console; here it just means the drag fallback
+   * does the work instead.
+   */
   lock(): void {
-    this.controls.lock();
+    try {
+      this.controls.lock();
+    } catch {
+      // Nothing to do: dragging still turns the camera.
+    }
   }
 
   unlock(): void {
@@ -187,6 +209,17 @@ export class WorldView {
    */
   setMovementLocked(locked: boolean): void {
     this.movementLocked = locked;
+  }
+
+  /**
+   * Stop reading movement keys while the player is writing a command.
+   *
+   * Without pointer lock there is nothing else to tell "w" meaning walk from
+   * "w" meaning west being typed into the prompt.
+   */
+  setTyping(typing: boolean): void {
+    this.typing = typing;
+    if (typing) this.pressed.clear();
   }
 
   // ------------------------------------------------------------------- rooms
@@ -410,10 +443,55 @@ export class WorldView {
     this.pressed.delete(event.code);
   };
 
+  /**
+   * Look around by dragging, for when the pointer cannot be locked.
+   *
+   * Pointer lock needs permission the page does not always have — an iframe
+   * without `allow="pointer-lock"` simply refuses, and the request rejects
+   * silently. Rather than leave the player unable to turn their head, holding
+   * the left button and dragging rotates the camera exactly as mouse-look
+   * would. A press that ends without travelling counts as a click instead, so
+   * one button does both jobs without a mode to remember.
+   */
+  private applyLook(deltaX: number, deltaY: number): void {
+    const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+    euler.setFromQuaternion(this.camera.quaternion);
+    euler.y -= deltaX * LOOK_SENSITIVITY;
+    euler.x -= deltaY * LOOK_SENSITIVITY;
+    // Stop just short of straight up and down; going past would flip the roll.
+    euler.x = THREE.MathUtils.clamp(euler.x, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
+    this.camera.quaternion.setFromEuler(euler);
+  }
+
   private handleClick = (event: MouseEvent): void => {
-    if (!this.controls.isLocked) return;
     if (event.button !== 0) return;
-    this.interactWithFocus();
+
+    // With the pointer locked there is no drag to track: a click is a click.
+    if (this.controls.isLocked) {
+      this.interactWithFocus();
+      return;
+    }
+
+    this.dragging = { x: event.clientX, y: event.clientY, travelled: 0 };
+  };
+
+  private handleMouseMove = (event: MouseEvent): void => {
+    if (!this.dragging || this.controls.isLocked) return;
+
+    const deltaX = event.clientX - this.dragging.x;
+    const deltaY = event.clientY - this.dragging.y;
+    this.dragging.travelled += Math.abs(deltaX) + Math.abs(deltaY);
+    this.dragging.x = event.clientX;
+    this.dragging.y = event.clientY;
+
+    this.applyLook(deltaX, deltaY);
+  };
+
+  private handleMouseUp = (): void => {
+    const drag = this.dragging;
+    this.dragging = null;
+    // A press that barely moved was someone pointing at something, not turning.
+    if (drag && drag.travelled < 6) this.interactWithFocus();
   };
 
   /** The object under the reticle, if any. */
@@ -492,7 +570,10 @@ export class WorldView {
   }
 
   private updateMovement(delta: number): void {
-    if (!this.controls.isLocked || !this.built) return;
+    // Deliberately not gated on pointer lock: where lock is unavailable the
+    // player still needs to walk. Typing is the only thing that suspends
+    // movement, and the key handler already ignores events from the prompt.
+    if (!this.built || this.typing) return;
 
     const forward = Number(this.pressed.has('KeyW')) - Number(this.pressed.has('KeyS'));
     const strafe = Number(this.pressed.has('KeyD')) - Number(this.pressed.has('KeyA'));
@@ -557,6 +638,8 @@ export class WorldView {
     window.removeEventListener('keydown', this.handleKeyDown);
     window.removeEventListener('keyup', this.handleKeyUp);
     this.canvas.removeEventListener('mousedown', this.handleClick);
+    window.removeEventListener('mousemove', this.handleMouseMove);
+    window.removeEventListener('mouseup', this.handleMouseUp);
     this.teardownRoom();
     this.materials.dispose();
     this.renderer.dispose();

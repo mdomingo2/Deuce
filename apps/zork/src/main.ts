@@ -232,6 +232,13 @@ async function boot(): Promise<void> {
     if (!view.isLocked) view.lock();
   });
 
+  // Movement keys and typed commands share a keyboard, and without pointer
+  // lock there is nothing else to tell "w" meaning walk from "w" being typed
+  // into the prompt.
+  const promptInput = document.getElementById('prompt-input');
+  promptInput?.addEventListener('focus', () => view.setTyping(true));
+  promptInput?.addEventListener('blur', () => view.setTyping(false));
+
   window.addEventListener('keydown', (event) => {
     // Tab drops out of mouse-look and into the prompt, and back again.
     if (event.code === 'Tab') {

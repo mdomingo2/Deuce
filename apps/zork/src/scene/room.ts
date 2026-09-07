@@ -19,6 +19,7 @@
 import * as THREE from 'three';
 import type { Direction, Exit } from '@deuce/zmachine';
 import { tileSizeOf, type MaterialLibrary } from './materials.js';
+import { displaceGeometry, segmentsFor } from './displace.js';
 import type { RoomStyle } from '../data/roomStyles.js';
 
 export const EYE_HEIGHT = 1.7;
@@ -288,11 +289,28 @@ export function buildRoom(
   // edge of the world over the top of a low bank.
   const floorWidth = open ? width * 3 : width;
   const floorDepth = open ? depth * 3 : depth;
+  const rough = style.irregular ?? 0;
   for (const rect of planeWithHole(floorWidth, floorDepth, floorHole)) {
-    const geometry = new THREE.PlaneGeometry(rect.w, rect.d);
+    const geometry = new THREE.PlaneGeometry(
+      rect.w,
+      rect.d,
+      segmentsFor(rect.w),
+      segmentsFor(rect.d),
+    );
     tileUVs(geometry, rect.w, rect.d, tileSizeOf(style.floor));
+    const rotation = new THREE.Euler(-Math.PI / 2, 0, 0);
+    // The floor gets much less than the walls: the camera's eye height is
+    // fixed, so a floor that rolls underneath makes the player look like they
+    // are hovering rather than walking.
+    displaceGeometry(geometry, {
+      amount: rough * 0.09,
+      scale: 3.4,
+      offset: new THREE.Vector3(rect.x, 0, rect.z),
+      rotation,
+      pinEdges: true,
+    });
     const mesh = new THREE.Mesh(geometry, floorMat);
-    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.copy(rotation);
     mesh.position.set(rect.x, 0, rect.z);
     mesh.receiveShadow = true;
     group.add(mesh);
@@ -300,11 +318,27 @@ export function buildRoom(
 
   if (ceilingMat) {
     for (const rect of planeWithHole(width, depth, ceilingHole)) {
-      const geometry = new THREE.PlaneGeometry(rect.w, rect.d);
+      const geometry = new THREE.PlaneGeometry(
+        rect.w,
+        rect.d,
+        segmentsFor(rect.w),
+        segmentsFor(rect.d),
+      );
       tileUVs(geometry, rect.w, rect.d, tileSizeOf(style.ceiling ?? 'stone'));
+      const rotation = new THREE.Euler(Math.PI / 2, 0, 0);
+      // The roof of a cave can be as broken as it likes — nobody walks on it,
+      // and a jagged ceiling is most of what sells a space as underground.
+      displaceGeometry(geometry, {
+        amount: rough * 0.5,
+        scale: 2.6,
+        offset: new THREE.Vector3(rect.x, height, rect.z),
+        rotation,
+        pinEdges: true,
+      });
       const mesh = new THREE.Mesh(geometry, ceilingMat);
-      mesh.rotation.x = Math.PI / 2;
+      mesh.rotation.copy(rotation);
       mesh.position.set(rect.x, height, rect.z);
+      mesh.receiveShadow = true;
       group.add(mesh);
     }
   }
@@ -362,20 +396,39 @@ export function buildRoom(
     // itself is drawn as a treeline by the set dressing instead of as a bank
     // of earth — a 1.7m wall around a field reads as a pit, not as a clearing.
     for (const piece of open ? [] : wallSegments(wall.length, height, openings)) {
-      const geometry = new THREE.BoxGeometry(piece.w, piece.h, WALL_THICKNESS);
+      const geometry = new THREE.BoxGeometry(
+        piece.w,
+        piece.h,
+        WALL_THICKNESS,
+        segmentsFor(piece.w),
+        segmentsFor(piece.h),
+        1,
+      );
       tileUVs(geometry, piece.w, piece.h, tileSizeOf(style.walls));
-      const mesh = new THREE.Mesh(geometry, wallMat);
 
       // Position in wall-local space, then rotate the whole thing into place.
       const along = piece.u + piece.w / 2 - wall.length / 2;
       const localY = piece.v + piece.h / 2;
+      const sideways = wall.key === 'east' || wall.key === 'west';
+      const placeAt = sideways
+        ? new THREE.Vector3(wall.x, localY, along)
+        : new THREE.Vector3(along, localY, wall.z);
+      const rotation = new THREE.Euler(0, sideways ? Math.PI / 2 : 0, 0);
 
-      if (wall.key === 'north' || wall.key === 'south') {
-        mesh.position.set(along, localY, wall.z);
-      } else {
-        mesh.position.set(wall.x, localY, along);
-        mesh.rotation.y = Math.PI / 2;
-      }
+      // Walls carry the most displacement of anything. The wall is thicker
+      // than the amount it moves, so however lumpy it gets it never opens a
+      // hole into the void behind the room.
+      displaceGeometry(geometry, {
+        amount: rough * 0.24,
+        scale: 2.4,
+        offset: placeAt,
+        rotation,
+        pinEdges: false,
+      });
+
+      const mesh = new THREE.Mesh(geometry, wallMat);
+      mesh.position.copy(placeAt);
+      mesh.rotation.copy(rotation);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       group.add(mesh);
@@ -414,18 +467,36 @@ export function buildRoom(
         if (wall.key === 'east' || wall.key === 'west') barrier.rotation.y = Math.PI / 2;
         group.add(barrier);
       } else if (!open) {
-        // A passable opening gets a sliver of darkness behind it, so that the
-        // fog does not simply show the void colour and flatten the doorway.
-        // Outdoors there is nothing behind the gap but more daylight.
-        const beyond = new THREE.Mesh(
+        // A short length of passage behind the opening, seen from inside.
+        //
+        // A flat black rectangle reads as a sticker on the wall — it has no
+        // parallax, so it stays the same shape as the player moves and the
+        // doorway never feels like a hole. A box with its faces flipped
+        // inward is a real tunnel: the lantern falls off down it, the fog
+        // gathers in it, and the far end genuinely recedes.
+        const tunnel = new THREE.Mesh(
+          new THREE.BoxGeometry(DOOR_WIDTH, opening.height, 3.4),
+          materials.get(style.walls, style.wallTint, seed + 5),
+        );
+        tunnel.material.side = THREE.BackSide;
+        tunnel.position.copy(position);
+        tunnel.position.y = opening.height / 2;
+        // Pushed outward so it starts inside the wall and runs away from the
+        // room, and rotated to lie along the direction of travel.
+        tunnel.position.addScaledVector(wall.normal, -1.7 - WALL_THICKNESS / 2);
+        if (wall.key === 'east' || wall.key === 'west') tunnel.rotation.y = Math.PI / 2;
+        group.add(tunnel);
+
+        // A cap at the far end, so a lit passage does not show the void.
+        const cap = new THREE.Mesh(
           new THREE.PlaneGeometry(DOOR_WIDTH, opening.height),
           materials.plain('#05060a', { roughness: 1 }),
         );
-        beyond.position.copy(position);
-        beyond.position.y = opening.height / 2;
-        beyond.position.addScaledVector(wall.normal, -WALL_THICKNESS * 1.4);
-        if (wall.key === 'east' || wall.key === 'west') beyond.rotation.y = Math.PI / 2;
-        group.add(beyond);
+        cap.position.copy(position);
+        cap.position.y = opening.height / 2;
+        cap.position.addScaledVector(wall.normal, -3.4 - WALL_THICKNESS / 2);
+        if (wall.key === 'east' || wall.key === 'west') cap.rotation.y = Math.PI / 2;
+        group.add(cap);
       }
     });
   }

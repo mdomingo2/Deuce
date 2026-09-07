@@ -62,6 +62,16 @@ export interface RoomStyle {
   fogDensity: number;
   fogColor: string;
 
+  /**
+   * How far the surfaces are pushed out of true, 0..1.
+   *
+   * Zero leaves flat walls and square corners, which is right for a house, a
+   * temple or the dam. Anything cut out of rock wants most of the range: the
+   * thing that gives a cave away as a rendered box is not the texture on it,
+   * it is that every silhouette is a straight line.
+   */
+  irregular: number;
+
   /** Set dressing, drawn from a small library of procedural props. */
   props: PropKind[];
 
@@ -110,6 +120,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#b9c4d2',
     fogDensity: 0.028,
     fogColor: '#8c98a4',
+    irregular: 0.5,
     props: ['trees'],
     seed: 11,
   },
@@ -128,6 +139,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#c2cbd6',
     fogDensity: 0.02,
     fogColor: '#97a2ae',
+    irregular: 0.35,
     props: ['house-facade', 'trees'],
     seed: 23,
   },
@@ -147,6 +159,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#d8c39a',
     fogDensity: 0.012,
     fogColor: '#2a2318',
+    irregular: 0.0,
     props: [],
     seed: 31,
   },
@@ -166,6 +179,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#3d4a5a',
     fogDensity: 0.042,
     fogColor: '#0a0c10',
+    irregular: 0.75,
     props: ['rubble'],
     seed: 47,
   },
@@ -184,6 +198,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#3a4655',
     fogDensity: 0.045,
     fogColor: '#08090c',
+    irregular: 0.95,
     props: ['stalactites', 'rubble'],
     seed: 53,
   },
@@ -203,6 +218,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#38404d',
     fogDensity: 0.055,
     fogColor: '#07080b',
+    irregular: 0.8,
     props: ['rubble'],
     seed: 59,
   },
@@ -226,6 +242,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#333c47',
     fogDensity: 0.06,
     fogColor: '#06070a',
+    irregular: 0.85,
     props: [],
     seed: 61,
   },
@@ -245,6 +262,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#c8b389',
     fogDensity: 0.035,
     fogColor: '#14100a',
+    irregular: 0.08,
     props: ['columns'],
     seed: 71,
   },
@@ -263,6 +281,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#3a3630',
     fogDensity: 0.055,
     fogColor: '#060505',
+    irregular: 0.6,
     props: ['timber', 'coal-seam', 'rubble'],
     seed: 79,
   },
@@ -281,6 +300,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#5f7d8c',
     fogDensity: 0.05,
     fogColor: '#101a20',
+    irregular: 0.7,
     props: ['water', 'sand-drift'],
     seed: 83,
   },
@@ -306,6 +326,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#bcc6d0',
     fogDensity: 0.024,
     fogColor: '#94a0aa',
+    irregular: 0.6,
     props: ['water', 'sand-drift'],
     seed: 109,
   },
@@ -324,6 +345,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#c0c8d0',
     fogDensity: 0.022,
     fogColor: '#9aa4b0',
+    irregular: 0.9,
     props: ['boulder'],
     seed: 89,
   },
@@ -343,6 +365,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#aeb8c2',
     fogDensity: 0.025,
     fogColor: '#8e97a1',
+    irregular: 0.0,
     props: ['water'],
     seed: 97,
   },
@@ -363,6 +386,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#8c3a34',
     fogDensity: 0.055,
     fogColor: '#170a0a',
+    irregular: 0.8,
     props: ['gravestones', 'stalactites'],
     seed: 101,
   },
@@ -382,6 +406,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#7d88a0',
     fogDensity: 0.05,
     fogColor: '#0b0d12',
+    irregular: 0.25,
     props: [],
     seed: 103,
   },
@@ -400,6 +425,7 @@ const FAMILIES: Record<RoomFamily, RoomStyle> = {
     ambientColor: '#b3a98f',
     fogDensity: 0.03,
     fogColor: '#9a927f',
+    irregular: 0.55,
     props: ['boulder'],
     seed: 107,
   },

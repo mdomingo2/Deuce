@@ -35,32 +35,89 @@ function hashed(seed: number, salt: number): number {
 
 // --------------------------------------------------------------- set dressing
 
+/**
+ * A tree.
+ *
+ * Built from a leaning tapered trunk, a few branches and three overlapping
+ * canopy masses rather than a cylinder with a ball on top. The lean is the
+ * detail that does the most work: a stand of perfectly vertical trunks reads
+ * as a colonnade, and a couple of degrees of tilt in different directions
+ * turns the same geometry into woodland.
+ */
 function makeTree(materials: MaterialLibrary, seed: number): THREE.Group {
   const tree = new THREE.Group();
-  const height = 5 + hashed(seed, 1) * 4;
+  const height = 5.5 + hashed(seed, 1) * 4.5;
+  const bark = materials.get('wood', '#9a7a5e', seed);
 
   const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.16, 0.28, height, 6),
-    materials.plain('#3a2c22', { roughness: 1 }),
+    new THREE.CylinderGeometry(0.13, 0.34, height, 7, 3),
+    bark,
   );
   trunk.position.y = height / 2;
+  // A slight bend, applied by leaning the whole trunk from its base.
+  const lean = (hashed(seed, 30) - 0.5) * 0.16;
+  const leanAxis = hashed(seed, 31) * Math.PI * 2;
+  tree.rotation.set(Math.sin(leanAxis) * lean, 0, Math.cos(leanAxis) * lean);
   tree.add(trunk);
 
-  // Two offset canopies read as foliage better than one, and cost nothing.
-  for (let i = 0; i < 2; i += 1) {
+  // A root flare, so the trunk meets the ground instead of stopping at it.
+  const flare = new THREE.Mesh(new THREE.ConeGeometry(0.55, 0.7, 7), bark);
+  flare.position.y = 0.28;
+  tree.add(flare);
+
+  // Branches, angled up and out from the upper third of the trunk.
+  const branchCount = 3 + Math.floor(hashed(seed, 32) * 3);
+  for (let i = 0; i < branchCount; i += 1) {
+    const length = 0.9 + hashed(seed, 40 + i) * 1.5;
+    const branch = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.035, 0.09, length, 5),
+      bark,
+    );
+    const angle = (i / branchCount) * Math.PI * 2 + hashed(seed, 50 + i);
+    const atHeight = height * (0.5 + hashed(seed, 60 + i) * 0.34);
+    const tilt = 0.5 + hashed(seed, 70 + i) * 0.5;
+
+    branch.position.set(
+      Math.cos(angle) * length * 0.4,
+      atHeight + length * 0.28,
+      Math.sin(angle) * length * 0.4,
+    );
+    branch.rotation.set(Math.sin(angle) * tilt, 0, -Math.cos(angle) * tilt);
+    tree.add(branch);
+  }
+
+  // Three canopy masses in slightly different greens, so the foliage has
+  // internal shape rather than being one silhouette.
+  const greens = ['#38452a', '#44502f', '#2f3b24'];
+  for (let i = 0; i < 3; i += 1) {
+    const radius = 1.3 + hashed(seed, 2 + i) * 1.1;
     const canopy = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(1.5 + hashed(seed, 2 + i) * 0.9, 0),
-      materials.plain(i === 0 ? '#3d4a2b' : '#46512f', { roughness: 1 }),
+      new THREE.IcosahedronGeometry(radius, 1),
+      materials.plain(greens[i] ?? '#3d4a2b', { roughness: 1 }),
     );
     canopy.position.set(
-      (hashed(seed, 10 + i) - 0.5) * 1.2,
-      height * (0.72 + i * 0.16),
-      (hashed(seed, 20 + i) - 0.5) * 1.2,
+      (hashed(seed, 10 + i) - 0.5) * 2.1,
+      height * (0.7 + i * 0.13),
+      (hashed(seed, 20 + i) - 0.5) * 2.1,
     );
+    // Squash slightly: a canopy is wider than it is tall.
+    canopy.scale.set(1, 0.78, 1);
+    canopy.rotation.y = hashed(seed, 80 + i) * Math.PI;
     tree.add(canopy);
   }
 
   return tree;
+}
+
+/** A stalagmite: the floor's answer to a stalactite. */
+function makeStalagmite(materials: MaterialLibrary, seed: number, height: number): THREE.Mesh {
+  const spike = new THREE.Mesh(
+    new THREE.ConeGeometry(0.16 + hashed(seed, 12) * 0.28, height, 6, 2),
+    materials.get('rough-stone', '#7a746a', seed),
+  );
+  spike.position.y = height / 2;
+  spike.rotation.y = hashed(seed, 13) * Math.PI;
+  return spike;
 }
 
 /**
@@ -74,10 +131,45 @@ function makeHouseFacade(materials: MaterialLibrary): THREE.Group {
 
   const body = new THREE.Mesh(
     new THREE.BoxGeometry(9, 4.4, 6),
-    materials.plain('#c8c2b4', { roughness: 0.9 }),
+    materials.get('clapboard', '#f2ece0', 900),
   );
   body.position.y = 2.2;
   house.add(body);
+
+  // Boarded windows either side of the door. Zork is emphatic that every way
+  // in is shut, and blank clapboard does not say that; boarded glass does.
+  for (const sx of [-2.9, 2.9]) {
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 1.5, 0.14),
+      materials.plain('#7d7466', { roughness: 0.85 }),
+    );
+    frame.position.set(sx, 2.5, 3.02);
+    house.add(frame);
+
+    const glass = new THREE.Mesh(
+      new THREE.BoxGeometry(1.15, 1.25, 0.08),
+      materials.plain('#14161a', { roughness: 0.4, metalness: 0.2 }),
+    );
+    glass.position.set(sx, 2.5, 3.08);
+    house.add(glass);
+
+    for (let i = 0; i < 2; i += 1) {
+      const board = new THREE.Mesh(
+        new THREE.BoxGeometry(1.7, 0.2, 0.09),
+        materials.plain('#6b543c', { roughness: 0.95 }),
+      );
+      board.position.set(sx, 2.15 + i * 0.72, 3.14);
+      board.rotation.z = (i % 2 === 0 ? 1 : -1) * 0.09;
+      house.add(board);
+    }
+  }
+
+  const chimney = new THREE.Mesh(
+    new THREE.BoxGeometry(0.9, 2.6, 0.9),
+    materials.get('brick', '#8a6a58', 901),
+  );
+  chimney.position.set(-3.1, 5.2, -1.2);
+  house.add(chimney);
 
   // A simple gable, rotated so a four-sided cone reads as a pitched roof.
   const roof = new THREE.Mesh(
@@ -141,8 +233,8 @@ function makeStalactite(materials: MaterialLibrary, seed: number, length: number
 function makeRubble(materials: MaterialLibrary, seed: number): THREE.Mesh {
   const size = 0.2 + hashed(seed, 4) * 0.45;
   const rock = new THREE.Mesh(
-    new THREE.DodecahedronGeometry(size, 0),
-    materials.plain('#5e594f', { roughness: 1 }),
+    new THREE.DodecahedronGeometry(size, 1),
+    materials.get('rough-stone', '#6e685c', seed),
   );
   rock.rotation.set(hashed(seed, 5) * 3, hashed(seed, 6) * 3, hashed(seed, 7) * 3);
   rock.position.y = size * 0.6;
@@ -259,11 +351,21 @@ export function buildSetDressing(
         break;
       }
       case 'stalactites': {
-        for (let i = 0; i < 12; i += 1) {
-          const length = 0.5 + hashed(seed, 200 + i) * 1.3;
+        for (let i = 0; i < 14; i += 1) {
+          const length = 0.5 + hashed(seed, 200 + i) * 1.4;
           const spike = makeStalactite(materials, seed + i * 17, length);
           const at = scatter(200 + i * 2, 1);
           spike.position.set(at.x, height - length / 2, at.z);
+          group.add(spike);
+        }
+        // Stalagmites rising to meet them. Without these the ceiling looks
+        // like it is growing teeth into an empty room.
+        for (let i = 0; i < 7; i += 1) {
+          const tall = 0.4 + hashed(seed, 250 + i) * 1.1;
+          const spike = makeStalagmite(materials, seed + i * 23, tall);
+          const at = scatter(250 + i * 2, 0.95);
+          spike.position.x = at.x;
+          spike.position.z = at.z;
           group.add(spike);
         }
         break;
@@ -492,25 +594,30 @@ export function buildObjectMesh(
     grip.position.y = 0.07;
     add(grip);
   } else if (name.includes('trophy case')) {
-    const frame = box(1.5, 1.7, 0.5, '#5a4530', { roughness: 0.6 });
+    const frame = new THREE.Mesh(
+      new THREE.BoxGeometry(1.5, 1.7, 0.5),
+      materials.get('wood', '#6b5236', 950),
+    );
     frame.position.y = 0.85;
     add(frame);
     const glass = new THREE.Mesh(
       new THREE.BoxGeometry(1.35, 1.5, 0.04),
       new THREE.MeshStandardMaterial({
-        color: new THREE.Color('#aac4cc'),
+        color: new THREE.Color('#8fa8b0'),
         transparent: true,
-        opacity: 0.24,
-        roughness: 0.05,
-        metalness: 0.5,
+        opacity: 0.18,
+        // Barely reflective. At mirror roughness the lantern came back off it
+        // as a white sheet that hid the case and half the room behind it.
+        roughness: 0.42,
+        metalness: 0.1,
       }),
     );
     glass.position.set(0, 0.9, 0.27);
     add(glass);
   } else if (name.includes('rug') || name.includes('carpet')) {
     const rug = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.5, 1.5, 0.04, 20),
-      materials.plain('#6a2f2c', { roughness: 1 }),
+      new THREE.CylinderGeometry(1.5, 1.5, 0.04, 28),
+      materials.get('grass', '#7a3330', 952),
     );
     rug.position.y = 0.02;
     rug.scale.z = 0.72;
@@ -524,12 +631,13 @@ export function buildObjectMesh(
     border.scale.z = 0.72;
     add(border);
   } else if (name.includes('table')) {
-    const top = box(1.6, 0.08, 0.9, '#6b5136');
+    const timber = materials.get('plank', '#7d5f3e', 951);
+    const top = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.08, 0.9), timber);
     top.position.y = 0.78;
     add(top);
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const leg = box(0.09, 0.76, 0.09, '#57402b');
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.76, 0.09), timber);
         leg.position.set(sx * 0.72, 0.38, sz * 0.36);
         add(leg);
       }
@@ -537,7 +645,7 @@ export function buildObjectMesh(
   } else if (name.includes('coffin')) {
     const body = new THREE.Mesh(
       new THREE.BoxGeometry(1.9, 0.55, 0.68),
-      materials.plain('#b8912e', { metalness: 0.85, roughness: 0.3 }),
+      materials.get('metal', '#c99a2e', 953),
     );
     body.position.y = 0.3;
     add(body);
@@ -700,10 +808,10 @@ export function placeObjects(
     // room cannot land on the same spot.
     const angle =
       (index / Math.max(1, views.length)) * Math.PI * 2 + hashed(view.number, 40) * 0.7;
-    // Far enough in that objects stay within the lantern's reach and do not
-    // end up behind the player on arrival, far enough out that walking into a
-    // room does not put the trophy case in your face.
-    const radius = 0.34 + hashed(view.number, 41) * 0.2;
+    // Out toward the walls, but not against them. Closer in and arriving in
+    // the Living Room puts the trophy case about a metre from your nose, which
+    // both blows out under the lantern and hides the room behind it.
+    const radius = 0.55 + hashed(view.number, 41) * 0.16;
 
     mesh.position.set(
       Math.cos(angle) * (room.width / 2) * radius,

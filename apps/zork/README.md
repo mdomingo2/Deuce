@@ -70,13 +70,55 @@ time the troll connects.
 | File | |
 |---|---|
 | `src/main.ts` | the turn loop, and finding a story file |
-| `src/scene/view.ts` | camera, lights, movement, and turning input into sentences |
+| `src/scene/view.ts` | camera, lights, post-processing, movement, input → sentences |
 | `src/scene/room.ts` | room geometry, with real openings cut for real exits |
+| `src/scene/displace.ts` | pushing flat geometry out of shape |
 | `src/scene/props.ts` | object meshes and set dressing |
 | `src/scene/materials.ts` | procedural surfaces, painted into canvases at load |
+| `src/scene/dust.ts` | motes in the lantern beam |
 | `src/data/roomStyles.ts` | the art direction |
 | `src/ui/hud.ts` | room, score, inventory, carry weight, compass |
 | `src/ui/console.ts` | transcript and command line |
+
+### How it's rendered
+
+Almost all of Zork happens in the dark, lit by one lamp you are carrying. That
+single fact decides everything about the renderer, because a point light in a
+box is the least flattering setup in real-time graphics — it blows out whatever
+is within a metre and abandons everything past three.
+
+Five things do the work:
+
+**Nothing is flat.** Every surface texture is painted into a canvas at load,
+then read back as a height field and Sobelled into a normal map. Using the
+albedo's own luminance as height means the relief always agrees with the
+colour: the noise that darkens a patch of rock is the noise that dents it, and
+the mortar painted between stones becomes a groove that catches a shadow. The
+same height field drives a roughness map, so recesses read as rougher than the
+faces around them.
+
+**Nothing is square.** A cave built from boxes reads as boxes however good the
+texture, because every silhouette is a straight line. Wall, floor and ceiling
+vertices are displaced along their normals by a noise field sampled in *world*
+space — world space rather than per mesh, so a wall and the floor it meets
+bulge in agreement instead of tearing apart at the join. How far is per family:
+a cave gets almost the whole range, the Temple and the Dam get none.
+
+**The lantern casts.** It is the only shadow-caster underground, and cast
+shadow is most of what makes a lamp feel like a lamp — rubble throws a shape,
+and the shape moves when you do.
+
+**Falloff is near inverse-square, with cold fill.** Physically-plausible decay
+is what stops a nearby wall becoming a flat blown-out patch; a deliberately
+blue ambient then carries the distance, so rock has a shadow side that is
+*cooler* rather than merely darker. Warm key, cold fill — it is the difference
+between a cave and brown soup.
+
+**Bloom, and dust.** A bare point light clips to a flat disc of colour; letting
+the brightest part bleed turns that disc back into a flame behind glass. And a
+few hundred motes drifting in front of the camera give the light a volume,
+which also gives the player something to judge their own motion against when
+the far wall is too dark to track.
 
 ### Where the invention is
 

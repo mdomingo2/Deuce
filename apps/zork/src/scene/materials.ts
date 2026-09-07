@@ -1,6 +1,15 @@
 /**
  * Procedural surfaces.
  *
+ * One convention runs through the whole file and is worth stating before the
+ * recipes: **a base colour carries lightness, and the per-room tint carries
+ * hue and darkening.** Tints multiply, so a base that starts dark cannot be
+ * lifted by any tint — it can only be pushed further down. Authoring the rock
+ * base at near-black and expecting a mid-grey tint to bring it back produced
+ * cave walls at RGB (28, 25, 22), which is black in all but name, and left the
+ * lantern doing work that no amount of intensity could do without blowing out
+ * everything within a metre of it.
+ *
  * There are a hundred and ten rooms in Zork I and no art budget, so every
  * texture here is painted into a canvas at load time rather than fetched.
  * That buys three things: the whole game is one JavaScript bundle with no
@@ -91,7 +100,10 @@ function createCanvas(): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContex
   const canvas = document.createElement('canvas');
   canvas.width = TEXTURE_SIZE;
   canvas.height = TEXTURE_SIZE;
-  const ctx = canvas.getContext('2d');
+  // Every surface is read back twice — once for the height field and once for
+  // the normal map — so the browser is told up front to keep the buffer where
+  // the CPU can reach it rather than round-tripping the GPU each time.
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Could not get a 2D context to paint textures into.');
   return { canvas, ctx };
 }
@@ -109,6 +121,7 @@ function toTexture(canvas: HTMLCanvasElement): THREE.Texture {
 }
 
 export type SurfaceKind =
+  | 'clapboard'
   | 'stone'
   | 'rough-stone'
   | 'earth'
@@ -139,6 +152,17 @@ interface SurfaceRecipe {
    * block is the same size everywhere in the game.
    */
   tileSize: number;
+  /**
+   * How hard the derived normal map pushes, 0..3.
+   *
+   * This is the single biggest lever on how a surface reads under the lantern.
+   * Flat albedo lit by one moving point light looks like painted card; give the
+   * same texture relief and the light starts raking across it. Cave rock wants
+   * a lot, polished marble almost none.
+   */
+  normalStrength: number;
+  /** How much the surface's darker parts also read as rougher, 0..1. */
+  roughnessVariance?: number;
   paint?: (ctx: CanvasRenderingContext2D, seed: number) => void;
 }
 
@@ -215,76 +239,114 @@ function paintGrain(ctx: CanvasRenderingContext2D, seed: number, planks: number)
 }
 
 const RECIPES: Record<SurfaceKind, SurfaceRecipe> = {
+  /**
+   * Painted weatherboard, for the white house.
+   *
+   * It needs its own recipe rather than a tinted `plank` because tints
+   * multiply: no tint can turn brown timber into white paint, and the very
+   * first line of the game calls it a white house.
+   */
+  clapboard: {
+    base: '#cfc9ba',
+    contrast: 0.1,
+    roughness: 0.78,
+    metalness: 0,
+    tileSize: 1.5,
+    normalStrength: 1.0,
+    roughnessVariance: 0.14,
+    paint: (ctx, seed) => paintGrain(ctx, seed, 7),
+  },
   stone: {
-    base: '#4a4a48',
+    base: '#adaca8',
     contrast: 0.3,
     roughness: 0.92,
     metalness: 0,
     tileSize: 2.4,
+    normalStrength: 1.9,
+    roughnessVariance: 0.3,
     paint: (ctx, seed) =>
       paintMasonry(ctx, seed, { rows: 8, cols: 5, mortar: 'rgba(0,0,0,0.4)', jitter: 0.5 }),
   },
   'rough-stone': {
     // The natural cave rock that most of the underground is cut from.
-    base: '#3c3a36',
+    base: '#a9a49b',
     contrast: 0.55,
     roughness: 1,
     metalness: 0,
     tileSize: 3.2,
+    normalStrength: 2.6,
+    roughnessVariance: 0.34,
   },
   earth: {
-    base: '#4a3c2e',
+    // Bright enough that a mid tint still lands on soil rather than on tar:
+    // the tint multiplies this, so whatever the base loses cannot be given
+    // back further down.
+    base: '#8a7258',
     contrast: 0.42,
     roughness: 1,
     metalness: 0,
     tileSize: 3.0,
+    normalStrength: 2.2,
+    roughnessVariance: 0.3,
   },
   grass: {
-    base: '#3f4a2c',
+    base: '#93a86a',
     contrast: 0.38,
     roughness: 1,
     metalness: 0,
     tileSize: 2.2,
+    normalStrength: 1.7,
+    roughnessVariance: 0.22,
   },
   wood: {
-    base: '#5a4130',
+    base: '#9c7554',
     contrast: 0.2,
     roughness: 0.8,
     metalness: 0,
     tileSize: 1.8,
+    normalStrength: 1.1,
+    roughnessVariance: 0.2,
     paint: (ctx, seed) => paintGrain(ctx, seed, 6),
   },
   plank: {
-    base: '#6b4f38',
+    base: '#a8815e',
     contrast: 0.18,
     roughness: 0.75,
     metalness: 0,
     tileSize: 1.6,
+    normalStrength: 1.2,
+    roughnessVariance: 0.22,
     paint: (ctx, seed) => paintGrain(ctx, seed, 9),
   },
   brick: {
-    base: '#6b3f33',
+    base: '#b0796a',
     contrast: 0.22,
     roughness: 0.88,
     metalness: 0,
     tileSize: 2.0,
+    normalStrength: 1.8,
+    roughnessVariance: 0.28,
     paint: (ctx, seed) =>
       paintMasonry(ctx, seed, { rows: 12, cols: 6, mortar: 'rgba(190,180,165,0.28)', jitter: 0.6 }),
   },
   marble: {
     // The temple and the treasure rooms, where the empire spent money.
-    base: '#8d8a80',
+    base: '#cfccc2',
     contrast: 0.16,
     roughness: 0.35,
     metalness: 0.05,
     tileSize: 2.8,
+    normalStrength: 0.35,
+    roughnessVariance: 0.1,
   },
   sand: {
-    base: '#7a6a4e',
+    base: '#c4b294',
     contrast: 0.24,
     roughness: 1,
     metalness: 0,
     tileSize: 2.6,
+    normalStrength: 1.5,
+    roughnessVariance: 0.18,
   },
   water: {
     base: '#1e3a44',
@@ -292,24 +354,134 @@ const RECIPES: Record<SurfaceKind, SurfaceRecipe> = {
     roughness: 0.16,
     metalness: 0.4,
     tileSize: 3.5,
+    normalStrength: 0.6,
+    roughnessVariance: 0.05,
   },
   metal: {
-    base: '#54585c',
+    base: '#9aa0a6',
     contrast: 0.18,
     roughness: 0.42,
     metalness: 0.85,
     tileSize: 2.0,
+    normalStrength: 0.7,
+    roughnessVariance: 0.14,
   },
   ice: {
-    base: '#6f8b96',
+    base: '#b3cdd6',
     contrast: 0.14,
     roughness: 0.2,
     metalness: 0.1,
     tileSize: 2.4,
+    normalStrength: 0.5,
+    roughnessVariance: 0.08,
   },
 };
 
-function buildTexture(kind: SurfaceKind, seed: number): THREE.Texture {
+/**
+ * Read a painted canvas back as a height field.
+ *
+ * Using luminance as height is a cheat, but a well-behaved one for these
+ * surfaces: the noise that darkens a patch of rock is the same noise that
+ * would dent it, and the mortar lines painted between stones are exactly the
+ * grooves that should catch a shadow. It also means the relief automatically
+ * agrees with the colour, which a separately generated height map would not.
+ */
+function heightFromCanvas(ctx: CanvasRenderingContext2D): Float32Array {
+  const { data } = ctx.getImageData(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
+  const height = new Float32Array(TEXTURE_SIZE * TEXTURE_SIZE);
+
+  for (let i = 0; i < height.length; i += 1) {
+    const p = i * 4;
+    // Rec. 601 luma: green carries most of the perceived brightness.
+    height[i] =
+      ((data[p] ?? 0) * 0.299 + (data[p + 1] ?? 0) * 0.587 + (data[p + 2] ?? 0) * 0.114) / 255;
+  }
+  return height;
+}
+
+/**
+ * Sobel the height field into a tangent-space normal map.
+ *
+ * Sampling wraps at the edges so the normal map tiles as seamlessly as the
+ * colour it came from — a seam here would draw a hard lit line across every
+ * wall in the game at the tile boundary.
+ */
+function normalMapFrom(height: Float32Array, strength: number): THREE.Texture {
+  const { canvas, ctx } = createCanvas();
+  const image = ctx.createImageData(TEXTURE_SIZE, TEXTURE_SIZE);
+  const { data } = image;
+
+  const at = (x: number, y: number): number => {
+    const wx = ((x % TEXTURE_SIZE) + TEXTURE_SIZE) % TEXTURE_SIZE;
+    const wy = ((y % TEXTURE_SIZE) + TEXTURE_SIZE) % TEXTURE_SIZE;
+    return height[wy * TEXTURE_SIZE + wx] ?? 0;
+  };
+
+  for (let y = 0; y < TEXTURE_SIZE; y += 1) {
+    for (let x = 0; x < TEXTURE_SIZE; x += 1) {
+      const dx =
+        at(x - 1, y - 1) + 2 * at(x - 1, y) + at(x - 1, y + 1) -
+        (at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1));
+      const dy =
+        at(x - 1, y - 1) + 2 * at(x, y - 1) + at(x + 1, y - 1) -
+        (at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1));
+
+      // Normalise (dx, dy, 1/strength) and pack into 0..255 per channel.
+      const nz = 1 / Math.max(0.05, strength);
+      const length = Math.hypot(dx, dy, nz) || 1;
+      const p = (y * TEXTURE_SIZE + x) * 4;
+      data[p] = ((dx / length) * 0.5 + 0.5) * 255;
+      data[p + 1] = ((dy / length) * 0.5 + 0.5) * 255;
+      data[p + 2] = ((nz / length) * 0.5 + 0.5) * 255;
+      data[p + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(image, 0, 0);
+  const texture = toTexture(canvas);
+  // A normal map holds vectors, not colour, and must not be gamma-decoded.
+  texture.colorSpace = THREE.NoColorSpace;
+  return texture;
+}
+
+/**
+ * Turn the height field into a roughness map.
+ *
+ * Recessed, darker areas — mortar, the pits in rock — hold dirt and scatter
+ * more, so they read as rougher than the faces around them. It is a small
+ * effect but it stops a surface looking uniformly matte, which is most of what
+ * gives cheap 3D away.
+ */
+function roughnessMapFrom(height: Float32Array, base: number, variance: number): THREE.Texture {
+  const { canvas, ctx } = createCanvas();
+  const image = ctx.createImageData(TEXTURE_SIZE, TEXTURE_SIZE);
+  const { data } = image;
+
+  for (let i = 0; i < height.length; i += 1) {
+    const value = THREE.MathUtils.clamp(
+      base + (0.5 - (height[i] ?? 0.5)) * variance,
+      0.04,
+      1,
+    );
+    const p = i * 4;
+    data[p] = data[p + 1] = data[p + 2] = value * 255;
+    data[p + 3] = 255;
+  }
+
+  ctx.putImageData(image, 0, 0);
+  const texture = toTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  return texture;
+}
+
+/** Albedo, relief and roughness for one surface, generated together. */
+interface SurfaceMaps {
+  map: THREE.Texture;
+  normalMap: THREE.Texture;
+  roughnessMap: THREE.Texture;
+}
+
+function buildTexture(kind: SurfaceKind, seed: number): SurfaceMaps {
   const recipe = RECIPES[kind];
   const { canvas, ctx } = createCanvas();
 
@@ -334,7 +506,19 @@ function buildTexture(kind: SurfaceKind, seed: number): THREE.Texture {
 
   recipe.paint?.(ctx, seed + 104_729);
 
-  return toTexture(canvas);
+  // The height field is read back *after* painting, so mortar lines and plank
+  // seams become grooves in the relief rather than only marks in the colour.
+  const height = heightFromCanvas(ctx);
+
+  return {
+    map: toTexture(canvas),
+    normalMap: normalMapFrom(height, recipe.normalStrength),
+    roughnessMap: roughnessMapFrom(
+      height,
+      recipe.roughness,
+      recipe.roughnessVariance ?? 0.25,
+    ),
+  };
 }
 
 /**
@@ -345,7 +529,7 @@ function buildTexture(kind: SurfaceKind, seed: number): THREE.Texture {
  * together when the world is torn down.
  */
 export class MaterialLibrary {
-  private readonly textures = new Map<string, THREE.Texture>();
+  private readonly surfaces = new Map<string, SurfaceMaps>();
   private readonly materials = new Map<string, THREE.MeshStandardMaterial>();
 
   /**
@@ -356,21 +540,25 @@ export class MaterialLibrary {
    * different places.
    */
   get(kind: SurfaceKind, tint = '#ffffff', seed = 1): THREE.MeshStandardMaterial {
-    const textureKey = `${kind}:${seed}`;
-    let texture = this.textures.get(textureKey);
-    if (!texture) {
-      texture = buildTexture(kind, seed);
-      this.textures.set(textureKey, texture);
+    const surfaceKey = `${kind}:${seed}`;
+    let surface = this.surfaces.get(surfaceKey);
+    if (!surface) {
+      surface = buildTexture(kind, seed);
+      this.surfaces.set(surfaceKey, surface);
     }
 
-    const materialKey = `${textureKey}:${tint}`;
+    const materialKey = `${surfaceKey}:${tint}`;
     let material = this.materials.get(materialKey);
     if (!material) {
       const recipe = RECIPES[kind];
       material = new THREE.MeshStandardMaterial({
-        map: texture,
+        map: surface.map,
+        normalMap: surface.normalMap,
+        roughnessMap: surface.roughnessMap,
         color: new THREE.Color(tint),
-        roughness: recipe.roughness,
+        // roughness multiplies the map, so it stays at one and lets the map
+        // carry the whole range rather than compressing it.
+        roughness: 1,
         metalness: recipe.metalness,
       });
       this.materials.set(materialKey, material);
@@ -402,9 +590,13 @@ export class MaterialLibrary {
   }
 
   dispose(): void {
-    for (const texture of this.textures.values()) texture.dispose();
+    for (const surface of this.surfaces.values()) {
+      surface.map.dispose();
+      surface.normalMap.dispose();
+      surface.roughnessMap.dispose();
+    }
     for (const material of this.materials.values()) material.dispose();
-    this.textures.clear();
+    this.surfaces.clear();
     this.materials.clear();
   }
 }
@@ -418,4 +610,40 @@ export class MaterialLibrary {
  */
 export function tileSizeOf(kind: SurfaceKind): number {
   return RECIPES[kind].tileSize;
+}
+
+/**
+ * A sky for outdoor rooms.
+ *
+ * `scene.background` set to a flat colour gives a horizon that is the same
+ * value straight up as it is at eye level, which no real sky has ever done and
+ * which reads instantly as a rendered backdrop. An equirectangular gradient
+ * costs one small canvas and puts the light where the eye expects it: brighter
+ * toward the horizon, deeper overhead.
+ *
+ * Zork's outdoors is overcast New England, so the gradient is narrow and grey
+ * rather than a travel-poster blue.
+ */
+export function skyTexture(zenith: string, horizon: string): THREE.Texture {
+  const width = 16;
+  const height = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not get a 2D context to paint the sky into.');
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, height);
+  gradient.addColorStop(0, zenith);
+  gradient.addColorStop(0.55, horizon);
+  // Below the horizon the "sky" is only ever seen through fog at the very edge
+  // of the ground plane, so it darkens rather than continuing to brighten.
+  gradient.addColorStop(1, '#4e5359');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }

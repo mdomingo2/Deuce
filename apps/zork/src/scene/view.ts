@@ -17,11 +17,16 @@
 
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/examples/jsm/controls/PointerLockControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { Direction, Exit, ObjectView, WorldSnapshot } from '@deuce/zmachine';
 
-import { MaterialLibrary } from './materials.js';
+import { MaterialLibrary, skyTexture } from './materials.js';
 import { buildRoom, EYE_HEIGHT, type BuiltRoom } from './room.js';
 import { buildSetDressing, placeObjects } from './props.js';
+import { createDust, type Dust } from './dust.js';
 import { styleFor, type RoomStyle } from '../data/roomStyles.js';
 
 const WALK_SPEED = 3.6;
@@ -94,9 +99,25 @@ export class WorldView {
   private readonly materials = new MaterialLibrary();
   private readonly clock = new THREE.Clock();
   private readonly raycaster = new THREE.Raycaster();
+  private readonly composer: EffectComposer;
+  private readonly bloom: UnrealBloomPass;
+  private dust: Dust | null = null;
+  /** Cached per palette, since only a handful of skies are ever used. */
+  private readonly skies = new Map<string, THREE.Texture>();
 
-  /** Everything belonging to the current room, torn down on every change. */
+  /** Everything belonging to the current room, torn down on a room change. */
   private roomGroup: THREE.Group | null = null;
+  /**
+   * Just the objects lying in the room, rebuilt on every turn.
+   *
+   * Kept separate from the shell because the shell is expensive — displacing
+   * and re-normalising every wall runs over tens of thousands of vertices, and
+   * doing that on each turn to notice that the thief has taken a coin is most
+   * of a frame wasted.
+   */
+  private objectLayer: THREE.Group | null = null;
+  private objectRoom = -1;
+  private lastExitSignature = '';
   private built: BuiltRoom | null = null;
   private interactables: THREE.Object3D[] = [];
 
@@ -133,11 +154,14 @@ export class WorldView {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
+    // Percentage-closer filtering: a point light's shadow map is a cube and
+    // cannot be large, so the softening is what keeps its edges from reading
+    // as stair-steps across a wall.
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     // Zork lives at the bottom of the exposure range, so a filmic curve keeps
     // the lantern's falloff from clipping to flat black.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.92;
+    this.renderer.toneMappingExposure = 1.05;
 
     this.camera = new THREE.PerspectiveCamera(
       72,
@@ -154,10 +178,51 @@ export class WorldView {
     // it at eye level lights the walls but leaves the floor black, which is
     // disorienting to walk around in.
     this.lantern.position.set(0.25, -0.45, -0.2);
+    // The lantern is the only thing casting underground, and cast shadow is
+    // most of what makes a lantern feel like a lantern — the rubble on the
+    // floor throws a shape, and the shape moves when you do.
+    this.lantern.castShadow = true;
+    this.lantern.shadow.mapSize.set(512, 512);
+    this.lantern.shadow.camera.near = 0.15;
+    this.lantern.shadow.camera.far = 26;
+    // Shadow acne on displaced rock is much worse than a little peter-panning.
+    this.lantern.shadow.bias = -0.006;
+    this.lantern.shadow.normalBias = 0.04;
     this.camera.add(this.lantern);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.mapSize.set(2048, 2048);
+    // A directional light's default shadow frustum is a 10-metre box, which is
+    // smaller than any outdoor room here — the edge of it showed up as a hard
+    // lit rectangle across the front of the white house.
+    this.sun.shadow.camera.left = -34;
+    this.sun.shadow.camera.right = 34;
+    this.sun.shadow.camera.top = 34;
+    this.sun.shadow.camera.bottom = -34;
+    this.sun.shadow.camera.near = 0.5;
+    this.sun.shadow.camera.far = 90;
+    this.sun.shadow.bias = -0.0012;
+    this.sun.shadow.normalBias = 0.03;
     this.scene.add(this.ambient, this.hemisphere, this.sun, this.roomLight);
+
+    this.dust = createDust();
+    this.scene.add(this.dust.points);
+
+    // Post-processing. Bloom is doing real work here rather than being a
+    // flourish: a bare point light in a dark room clips to a flat disc of
+    // colour, and letting the brightest part bleed is what turns that disc
+    // back into something that reads as a flame behind glass.
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      0.6,
+      0.7,
+      0.72,
+    );
+    this.composer.addPass(this.bloom);
+    // OutputPass applies tone mapping and the colour-space conversion that the
+    // renderer would otherwise have done on its own.
+    this.composer.addPass(new OutputPass());
 
     window.addEventListener('resize', this.handleResize);
     window.addEventListener('keydown', this.handleKeyDown);
@@ -239,19 +304,18 @@ export class WorldView {
 
     const group = new THREE.Group();
     group.add(built.group);
-    group.add(
-      buildSetDressing(style.props, this.materials, {
-        width: style.width,
-        depth: style.depth,
-        height: style.height,
-        seed: style.seed,
-        // Outdoors the treeline stands in for walls, so it needs to know
-        // which bearings are ways out and must be left clear.
-        clearBearings: built.doorways
-          .filter((doorway) => !doorway.vertical)
-          .map((doorway) => Math.atan2(doorway.position.z, doorway.position.x)),
-      }),
-    );
+    const dressing = buildSetDressing(style.props, this.materials, {
+      width: style.width,
+      depth: style.depth,
+      height: style.height,
+      seed: style.seed,
+      // Outdoors the treeline stands in for walls, so it needs to know which
+      // bearings are ways out and must be left clear.
+      clearBearings: built.doorways
+        .filter((doorway) => !doorway.vertical)
+        .map((doorway) => Math.atan2(doorway.position.z, doorway.position.x)),
+    });
+    group.add(dressing);
 
     // Scenery the room declares is drawn but not made clickable — the white
     // house and the staircase are things to look at, and the game answers for
@@ -262,6 +326,22 @@ export class WorldView {
       depth: style.depth,
     });
     group.add(objectGroup);
+    this.objectLayer = objectGroup;
+    this.objectRoom = snapshot.room.number;
+    this.lastExitSignature = this.exitSignature(snapshot);
+
+    // Set dressing and objects both cast and receive. The room shell sets its
+    // own flags in the builder, deliberately leaving the black planes behind
+    // doorways out of it — those exist to be dark, and a slab of darkness that
+    // also casts a shadow would put a hole in the floor of the next room.
+    for (const shadowed of [dressing, objectGroup]) {
+      shadowed.traverse((node) => {
+        if (node instanceof THREE.Mesh) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+    }
 
     this.scene.add(group);
     this.roomGroup = group;
@@ -282,15 +362,84 @@ export class WorldView {
    * the camera is left exactly where it was.
    */
   refreshRoom(snapshot: WorldSnapshot): void {
-    const position = this.controls.object.position.clone();
-    const quaternion = this.camera.quaternion.clone();
+    // The shell only has to be rebuilt when something about the room's *shape*
+    // changed — which, since exits are read from the story file, means a door
+    // opening or a flag flipping. Comparing the exit signature catches that
+    // without rebuilding a cave's worth of displaced rock every turn.
+    const shellStale =
+      !this.roomGroup ||
+      this.objectRoom !== snapshot.room.number ||
+      this.exitSignature(snapshot) !== this.lastExitSignature;
 
-    this.setRoom(snapshot, null);
+    if (shellStale) {
+      const position = this.controls.object.position.clone();
+      const quaternion = this.camera.quaternion.clone();
 
-    this.controls.object.position.copy(position);
-    this.camera.quaternion.copy(quaternion);
-    // A refresh is not an arrival, so doorways stay live.
-    this.arrivedAt = 0;
+      this.setRoom(snapshot, null);
+
+      this.controls.object.position.copy(position);
+      this.camera.quaternion.copy(quaternion);
+      // A refresh is not an arrival, so doorways stay live.
+      this.arrivedAt = 0;
+      return;
+    }
+
+    // Otherwise only what is lying on the floor can have changed.
+    this.replaceObjects(snapshot);
+    this.applyLighting(snapshot, styleFor(
+      snapshot.room.number,
+      snapshot.room.name,
+      snapshot.room.selfLit,
+    ));
+  }
+
+  /**
+   * A compact description of the room's exits.
+   *
+   * Two snapshots with the same signature produce identical geometry, so the
+   * shell can be reused. Passability is in it because an exit opening changes
+   * whether a barrier is drawn across it.
+   */
+  private exitSignature(snapshot: WorldSnapshot): string {
+    return snapshot.exits
+      .map((exit) => {
+        const passable =
+          exit.kind === 'plain' || exit.kind === 'computed'
+            ? true
+            : exit.kind === 'blocked'
+              ? false
+              : exit.passable;
+        return `${exit.direction}:${exit.kind}:${passable ? 1 : 0}`;
+      })
+      .join('|');
+  }
+
+  /** Swap the object layer without touching the room around it. */
+  private replaceObjects(snapshot: WorldSnapshot): void {
+    if (!this.roomGroup) return;
+
+    if (this.objectLayer) {
+      this.roomGroup.remove(this.objectLayer);
+      this.objectLayer.traverse((node) => {
+        if (node instanceof THREE.Mesh) node.geometry.dispose();
+      });
+    }
+
+    const style = styleFor(snapshot.room.number, snapshot.room.name, snapshot.room.selfLit);
+    const { group, targets } = placeObjects(snapshot.contents, this.materials, {
+      width: style.width,
+      depth: style.depth,
+    });
+    group.traverse((node) => {
+      if (node instanceof THREE.Mesh) {
+        node.castShadow = true;
+        node.receiveShadow = true;
+      }
+    });
+
+    this.roomGroup.add(group);
+    this.objectLayer = group;
+    this.interactables = targets;
   }
 
   private placeCamera(built: BuiltRoom, style: RoomStyle, cameFrom: Direction | null): void {
@@ -353,6 +502,9 @@ export class WorldView {
       this.sun.intensity = 0;
       this.roomLight.intensity = 0;
       this.lantern.intensity = 0;
+      this.dustVisible(false);
+      // Nothing is lit, so nothing should bloom.
+      this.bloom.strength = 0;
       this.scene.fog = new THREE.FogExp2(0x000000, 0.42);
       this.scene.background = new THREE.Color(0x000000);
       return;
@@ -382,8 +534,13 @@ export class WorldView {
     if (outdoors) {
       this.hemisphere.color.set(style.ambientColor);
       this.hemisphere.groundColor.set(style.floorTint);
-      this.sun.color.set('#f0e4cc');
-      this.sun.position.set(-14, 22, -10);
+      this.sun.color.set('#f4e8d0');
+      // Placed on the camera's side of the room, and high. Lighting from
+      // behind the scenery left every face the player looks at in shadow —
+      // the white house came out the colour of the trees.
+      this.sun.position.set(-13, 20, 15);
+      this.sun.target.position.set(0, 0, -4);
+      this.sun.target.updateMatrixWorld();
     }
 
     // The lantern only burns if something the player is carrying is lit. A
@@ -391,22 +548,51 @@ export class WorldView {
     const carryingLight = snapshot.inventory.some(
       (item) => item.providesLight || item.contents.some((c) => c.providesLight),
     );
-    // Decay just above linear, rather than physically correct inverse-square:
-    // a real flame at this intensity either blinds you at arm's length or dies
-    // within two metres, and the room has to be legible at both.
-    this.lantern.intensity = carryingLight ? 8 : 0;
-    this.lantern.distance = carryingLight ? 26 : 0;
 
-    // A trace of fill so that stone at the edge of the lantern's reach is dim
-    // rather than absent. Without it a cave reads as a black void with a
-    // spotlit disc in the middle of it.
+    // Decay near inverse-square, which is what stops a nearby wall reading as
+    // a flat blown-out patch of colour. The earlier near-linear falloff lit
+    // the far side of a room but destroyed everything within two metres; the
+    // fill below is what now carries the distance instead.
+    this.lantern.decay = 1.5;
+    this.lantern.intensity = carryingLight ? 15 : 0;
+    this.lantern.distance = carryingLight ? 28 : 0;
+
+    // Two-tone fill. The lantern is warm, so the fill is deliberately cold:
+    // separating the two gives rock a shadow side that is blue rather than
+    // merely darker, which is most of what stops a cave looking like brown
+    // soup.
     if (carryingLight && style.ambient < 0.1) {
-      this.ambient.color.set('#2a3038');
-      this.ambient.intensity = 0.22;
+      this.ambient.color.set('#3a5474');
+      this.ambient.intensity = 0.75;
     }
 
+    // Dust only where there is a beam for it to hang in.
+    this.dustVisible(carryingLight && !outdoors);
+
+    // Bloom is turned down outdoors, where daylight is broad and an overcast
+    // sky should not glow, and up underground where a single flame should.
+    this.bloom.strength = outdoors ? 0.22 : 0.75;
+    this.bloom.threshold = outdoors ? 0.85 : 0.62;
+
     this.scene.fog = new THREE.FogExp2(new THREE.Color(style.fogColor).getHex(), style.fogDensity);
-    this.scene.background = new THREE.Color(style.fogColor);
+
+    if (outdoors) {
+      // The gradient's lower stop is the fog colour, so the ground haze and
+      // the sky meet at the horizon instead of leaving a visible seam.
+      const key = `${style.ambientColor}:${style.fogColor}`;
+      let sky = this.skies.get(key);
+      if (!sky) {
+        sky = skyTexture(style.ambientColor, style.fogColor);
+        this.skies.set(key, sky);
+      }
+      this.scene.background = sky;
+    } else {
+      this.scene.background = new THREE.Color(style.fogColor);
+    }
+  }
+
+  private dustVisible(visible: boolean): void {
+    if (this.dust) this.dust.points.visible = visible;
   }
 
   private teardownRoom(): void {
@@ -420,6 +606,7 @@ export class WorldView {
     });
 
     this.roomGroup = null;
+    this.objectLayer = null;
     this.built = null;
     this.interactables = [];
   }
@@ -430,6 +617,7 @@ export class WorldView {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.composer.setSize(window.innerWidth, window.innerHeight);
   };
 
   private handleKeyDown = (event: KeyboardEvent): void => {
@@ -619,7 +807,8 @@ export class WorldView {
       this.checkDoorways();
       this.updateFocusLabel();
 
-      this.renderer.render(this.scene, this.camera);
+      this.dust?.update(delta, this.camera);
+      this.composer.render();
     };
     frame();
   }
@@ -641,7 +830,11 @@ export class WorldView {
     window.removeEventListener('mousemove', this.handleMouseMove);
     window.removeEventListener('mouseup', this.handleMouseUp);
     this.teardownRoom();
+    this.dust?.dispose();
+    for (const sky of this.skies.values()) sky.dispose();
+    this.skies.clear();
     this.materials.dispose();
+    this.composer.dispose();
     this.renderer.dispose();
   }
 }
